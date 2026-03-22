@@ -1,2 +1,4 @@
 requests==2.31.0
-urllib3==2.1.0
+pyqrcode==1.2.1
+pypng==0.20220729.0
+qrcode[pil]==7.4.2
