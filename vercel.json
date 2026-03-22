@@ -11,9 +11,5 @@
       "src": "/(.*)",
       "dest": "app.py"
     }
-  ],
-  "env": {
-    "BOT_TOKEN": "@bot_token",
-    "CHAT_ID": "@chat_id"
-  }
+  ]
 }
